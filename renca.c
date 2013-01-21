@@ -82,7 +82,7 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca)
 	{
 		while ((dir_en = readdir (dirp)))
 		{
-			if (!strcmp (dir_en->d_name, ".") || !strcmp (dir_en->d_name, ".."))
+			if (!strcmp (dir_en->d_name, ".") || !strcmp (dir_en->d_name, "..") || !strcmp (dir_en->d_name, ".git"))
 				continue;
 			if (process_name (dir_en->d_name, enca, namebuff))
 			{
