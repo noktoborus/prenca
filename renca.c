@@ -180,16 +180,14 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 					continue;
 				}
 				/* TODO: check exists path */
-#if 0
 				if (rename (sd_name[0], sd_name[1]) == -1)
 				{
 					fprintf (stderr, "FAIL: rename `%s' to `%s'\n", sd_name[0], sd_name[1]);
 					perror ("rename");
 					continue;
 				}
-#else
-				printf ("`%s' -> `%s' (%s -> %s)\n", sd_name[0], sd_name[1], fromcode, tocode); /* debug */
-#endif
+				else
+					fprintf (stderr, "RENAME: `%s' to `%s'\n", sd_name[0], sd_name[1]);
 			}
 			while (false);
 			if (dir_en->d_type == DT_DIR)
@@ -226,7 +224,6 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 			{
 				while (wdir_pop (&wdlist, sd_name[1]))
 				{
-					printf ("E %s \n", sd_name[1]);
 					snprintf (sd_name[0], path_len + NAME_BUFSZ, "%s/%s", path, sd_name[1]);
 					process_dir (sd_name[0], enca, tocode);
 				}
