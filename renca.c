@@ -78,6 +78,7 @@ process_name (const char *restrict name, EncaAnalyser *restrict enca)
 {
 	EncaEncoding res;
 	size_t len = strlen (name);
+	//printf ("PN: %s\n", name);
 	/* detect encoding */
 	enca_set_significant (*enca, 2); /* really fail */
 	enca_set_filtering (*enca, 0);
@@ -163,6 +164,7 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 				}
 				sd_name[1] = (sd_name[0] + (path_len + NAME_BUFSZ));
 				snprintf (sd_name[0], path_len + NAME_BUFSZ, "%s/%s", path, dir_en->d_name);
+				memset (sd_name[1], 0, path_len + NAME_BUFSZ);
 				snprintf (sd_name[1], path_len + NAME_BUFSZ, "%s/", path);
 				// convert name
 				{
@@ -176,8 +178,7 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 							&_src_len,
 							&_dst_p,
 							&_dst_len);
-					//printf ("X: %s (%s)\n", sd_name[1], fromcode);
-					continue;
+				//	printf ("X: %s (%s)\n", sd_name[1], fromcode);
 				}
 				/* TODO: check exists path */
 				if (rename (sd_name[0], sd_name[1]) == -1)
