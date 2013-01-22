@@ -188,7 +188,7 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 					continue;
 				}
 				else
-					fprintf (stderr, "RENAME: `%s' to `%s'\n", sd_name[0], sd_name[1]);
+					fprintf (stderr, "RENAME[%s]: `%s' to `%s'\n", fromcode, sd_name[0], sd_name[1]);
 			}
 			while (false);
 			if (dir_en->d_type == DT_DIR)
