@@ -93,6 +93,7 @@ process_name (const char *restrict name, EncaAnalyser *restrict enca)
 bool
 process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char *tocode)
 {
+	char *dirname;
 	struct wdlist_t wdlist;
 	size_t path_len = 0;
 	char *sd_name[2] = {NULL, NULL};
@@ -108,14 +109,15 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 	{
 		while ((dir_en = readdir (dirp)))
 		{
-			if (!strcmp (dir_en->d_name, ".") || !strcmp (dir_en->d_name, "..") || !strcmp (dir_en->d_name, ".git"))
+			dirname = dir_en->d_name;
+			if (!strcmp (dirname, ".") || !strcmp (dirname, "..") || !strcmp (dirname, ".git"))
 				continue;
 			do
 			{
 				// fail if codepage not detected
-				if (!(fromcode = process_name (dir_en->d_name, enca)))
+				if (!(fromcode = process_name (dirname, enca)))
 				{
-					fprintf (stderr, "FAIL: %s/%s\n", path, dir_en->d_name);
+					fprintf (stderr, "FAIL: %s/%s\n", path, dirname);
 					fprintf (stderr, "enca: [%d] %s\n", enca_errno (*enca), enca_strerror (*enca, enca_errno (*enca)));
 					continue;
 					// exception
@@ -137,7 +139,7 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 					wdlist._iconv.cd = iconv_open (tocode, fromcode);
 					if (wdlist._iconv.cd == (iconv_t)-1)
 					{
-						fprintf (stderr, "FAIL: %s/%s\n", path, dir_en->d_name);
+						fprintf (stderr, "FAIL: %s/%s\n", path, dirname);
 						perror ("iconv_open");
 						continue;
 					}
@@ -154,23 +156,23 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 						fputs ("FAIL: ", stderr);
 						fputs (path, stderr);
 						fputs ("/", stderr);
-						fputs (dir_en->d_name, stderr);
+						fputs (dirname, stderr);
 						fputs ("\n", stderr);
 						*/
-						fprintf (stderr, "FAIL: %s/%s\n", path, dir_en->d_name);
+						fprintf (stderr, "FAIL: %s/%s\n", path, dirname);
 						perror ("malloc-rename");
 						continue;
 					}
 				}
 				sd_name[1] = (sd_name[0] + (path_len + NAME_BUFSZ));
-				snprintf (sd_name[0], path_len + NAME_BUFSZ, "%s/%s", path, dir_en->d_name);
+				snprintf (sd_name[0], path_len + NAME_BUFSZ, "%s/%s", path, dirname);
 				memset (sd_name[1], 0, path_len + NAME_BUFSZ);
 				snprintf (sd_name[1], path_len + NAME_BUFSZ, "%s/", path);
 				// convert name
 				{
-					char *_src_p = dir_en->d_name;
+					char *_src_p = dirname;
 					char *_dst_p = sd_name[1] + path_len + 1;
-					size_t _src_len = strlen (dir_en->d_name);
+					size_t _src_len = strlen (dirname);
 					size_t _dst_len = NAME_BUFSZ;
 					/* TODO: check sizes */
 					iconv (wdlist._iconv.cd,
@@ -188,14 +190,18 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 					continue;
 				}
 				else
+				{
+					dirname = sd_name[1] + path_len + 1;
 					fprintf (stderr, "RENAME[%s]: `%s' to `%s'\n", fromcode, sd_name[0], sd_name[1]);
+				}
 			}
 			while (false);
 			if (dir_en->d_type == DT_DIR)
 			{
-				if (!wdir_push (&wdlist, dir_en->d_name))
+				printf ("ADD %s\n", dirname);
+				if (!wdir_push (&wdlist, dirname))
 				{
-					fprintf (stderr, "FAIL: %s/%s\n", path, dir_en->d_name);
+					fprintf (stderr, "FAIL: %s/%s\n", path, dirname);
 					perror ("wdir_push");
 				}
 			}
