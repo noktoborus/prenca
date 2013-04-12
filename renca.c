@@ -58,7 +58,6 @@ process_name (const char *restrict name, struct _opts_t *restrict opts)
 {
 	EncaEncoding res;
 	size_t len = strlen (name);
-	//printf ("PN: %s\n", name);
 	/* detect encoding */
 	enca_set_significant (opts->enca, 2); /* really fail */
 	enca_set_filtering (opts->enca, 0);
@@ -108,6 +107,9 @@ process_dir (const char *restrict path, struct _opts_t *restrict opts)
 				// skip ascii and tocode == fromcode
 				if (!strcmp (fromcode, "ASCII") || !strcasecmp (opts->to, fromcode)) /* ~_~ */
 					break;
+				/* setup force value */
+				if (opts->fromforce[0])
+					fromcode = opts->fromforce;
 				// init converter
 				if (wdlist._iconv.cd == (iconv_t)-1
 						|| !wdlist._iconv.from
@@ -151,11 +153,7 @@ process_dir (const char *restrict path, struct _opts_t *restrict opts)
 					size_t _src_len = strlen (dirname);
 					size_t _dst_len = NAME_BUFSZ;
 					size_t ret;
-					ret = iconv (wdlist._iconv.cd,
-							&_src_p,
-							&_src_len,
-							&_dst_p,
-							&_dst_len);
+					ret = iconv (wdlist._iconv.cd, &_src_p, &_src_len, &_dst_p, &_dst_len);
 					if ((size_t)-1 == ret)
 					{
 						fprintf (stderr, "FAIL: rename `%s' to `%s'\n", sd_name[0], sd_name[1]);
@@ -172,7 +170,7 @@ process_dir (const char *restrict path, struct _opts_t *restrict opts)
 						else
 						{
 							dirname = sd_name[1] + path_len + 1;
-							printf ("RENAME[%s]: `%s' to `%s'\n", fromcode, sd_name[0], sd_name[1]);
+							printf ("RENAME[%s:%s]: `%s' to `%s'\n", fromcode, opts->to, sd_name[0], sd_name[1]);
 						}
 					}
 				}
@@ -232,7 +230,21 @@ _set (struct _opts_t *opts, void *cont_data, uint8_t id, size_t argc, char **arg
 	switch (id)
 	{
 		case _SET_FROM:
-			strncpy (opts->from, argv[0], _RENCA_BFSZ);
+			{
+				register char *tmp;
+				register size_t len;
+				if ((tmp = strchr (argv[0], ':')))
+				{
+					len = tmp - argv[0];
+					if (len > _RENCA_BFSZ)
+						len = _RENCA_BFSZ;
+					strncpy (opts->fromforce, tmp + 1, _RENCA_BFSZ);
+					strncpy (opts->from, argv[0], len + 1);
+					opts->from[len] = '\0';
+				}
+				else
+					strncpy (opts->from, argv[0], _RENCA_BFSZ);
+			}
 			break;
 		case _SET_TO:
 			strncpy (opts->to, argv[0], _RENCA_BFSZ);
@@ -270,8 +282,11 @@ main (int argc, char *argv[])
 	/* set encoding to enca if len (from) is 0 or from == 'enca' */
 	if (!strncmp (opts.from, "enca", 5) || !strlen (opts.from))
 	{
-		/* set default fromcode */
-		snprintf (opts.from, _RENCA_BFSZ, "ASCII");
+		/* set default fromcode or force value (for validate only) */
+		if (opts.fromforce[0])
+			snprintf (opts.from, _RENCA_BFSZ, "%s", opts.fromforce);
+		else
+			snprintf (opts.from, _RENCA_BFSZ, "ASCII");
 		/* check enca data */
 		if (!(opts.enca = enca_analyser_alloc (opts.lang)))
 		{
@@ -297,11 +312,16 @@ main (int argc, char *argv[])
 	}
 	printf ("process on: %s\n", opts.dir);
 	if (opts.enca)
-		printf ("convert with enca, use language %s, to %s\n", opts.lang, opts.to);
+	{
+		if (opts.fromforce[0])
+			printf ("convert with enca (force %s), use language %s, to %s\n", opts.fromforce, opts.lang, opts.to);
+		else
+			printf ("convert with enca, use language %s, to %s\n", opts.lang, opts.to);
+	}
 	else
 		printf ("convert from: %s to %s\n", opts.from, opts.to);
-	if (!process_dir (".", &opts))
-		perror (".");
+	if (!process_dir (opts.dir, &opts))
+		perror (opts.dir);
 	if (opts.enca)
 		enca_analyser_free (opts.enca);
 	return EXIT_SUCCESS;

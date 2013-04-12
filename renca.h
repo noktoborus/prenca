@@ -46,6 +46,7 @@ struct wdir_t
 struct _opts_t
 {
 	char from[_RENCA_BFSZ + 1];
+	char fromforce[_RENCA_BFSZ + 1];
 	char to[_RENCA_BFSZ + 1];
 	char lang[_RENCA_BFSZ + 1];
 	char dir[PATH_MAX + 1];
