@@ -13,28 +13,8 @@
 #include <enca.h>
 #include <iconv.h>
 
-#ifndef NAME_MAX
-# define NAME_MAX 255
-#endif
-#define NAME_BUFSZ (NAME_MAX + 1)
-struct drv_iconv_t
-{
-	iconv_t cd;
-	const char *from;
-};
-
-struct wdlist_t
-{
-	size_t count;
-	struct wdir_t *list;
-	struct drv_iconv_t _iconv;
-};
-
-struct wdir_t
-{
-	char name[NAME_MAX + 1];
-	struct wdir_t *next;
-};
+#include "renca.h"
+#include "opts.h"
 
 bool
 wdir_pop (struct wdlist_t *restrict wdlist, char *restrict dirname)
@@ -74,16 +54,16 @@ wdir_empty (struct wdlist_t *wdlist)
 }
 
 const char*
-process_name (const char *restrict name, EncaAnalyser *restrict enca)
+process_name (const char *restrict name, struct _opts_t *restrict opts)
 {
 	EncaEncoding res;
 	size_t len = strlen (name);
 	//printf ("PN: %s\n", name);
 	/* detect encoding */
-	enca_set_significant (*enca, 2); /* really fail */
-	enca_set_filtering (*enca, 0);
-	enca_set_termination_strictness (*enca, 1);
-	res = enca_analyse_const (*enca, (const unsigned char *)name, len);
+	enca_set_significant (opts->enca, 2); /* really fail */
+	enca_set_filtering (opts->enca, 0);
+	enca_set_termination_strictness (opts->enca, 1);
+	res = enca_analyse_const (opts->enca, (const unsigned char *)name, len);
 	/* convert name to buffer */
 	if (enca_charset_is_known (res.charset))
 		return enca_charset_name (res.charset, ENCA_NAME_STYLE_ICONV);
@@ -91,14 +71,14 @@ process_name (const char *restrict name, EncaAnalyser *restrict enca)
 }
 
 bool
-process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char *tocode)
+process_dir (const char *restrict path, struct _opts_t *restrict opts)
 {
 	char *dirname;
 	struct wdlist_t wdlist;
 	size_t path_len = 0;
 	char *sd_name[2] = {NULL, NULL};
 	DIR *dirp;
-	const char *fromcode;
+	const char *fromcode = opts->from;
 	struct dirent *dir_en;
 	//printf ("PD: %s\n", path);
 	path_len = strlen (path);
@@ -114,17 +94,20 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 				continue;
 			do
 			{
-				// fail if codepage not detected
-				if (!(fromcode = process_name (dirname, enca)))
+				if (opts->enca)
 				{
-					fprintf (stderr, "FAIL: %s/%s\n", path, dirname);
-					fprintf (stderr, "enca: [%d] %s\n", enca_errno (*enca), enca_strerror (*enca, enca_errno (*enca)));
-					continue;
-					// exception
+					// fail if codepage not detected
+					if (!(fromcode = process_name (dirname, opts)))
+					{
+						fprintf (stderr, "FAIL: %s/%s\n", path, dirname);
+						fprintf (stderr, "enca: [%d] %s\n", enca_errno (opts->enca), enca_strerror (opts->enca, enca_errno (opts->enca)));
+						break;
+						// exception
+					}
 				}
 				// skip ascii and tocode == fromcode
-				if (!strcmp (fromcode, "ASCII") || !strcasecmp (tocode, fromcode)) /* ~_~ */
-					continue;
+				if (!strcmp (fromcode, "ASCII") || !strcasecmp (opts->to, fromcode)) /* ~_~ */
+					break;
 				// init converter
 				if (wdlist._iconv.cd == (iconv_t)-1
 						|| !wdlist._iconv.from
@@ -136,12 +119,12 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 						wdlist._iconv.cd = (iconv_t)-1;
 					}
 					wdlist._iconv.from = fromcode;
-					wdlist._iconv.cd = iconv_open (tocode, fromcode);
+					wdlist._iconv.cd = iconv_open (opts->to, fromcode);
 					if (wdlist._iconv.cd == (iconv_t)-1)
 					{
 						fprintf (stderr, "FAIL: %s/%s\n", path, dirname);
 						perror ("iconv_open");
-						continue;
+						break;
 					}
 				}
 				// alloc buffers
@@ -152,16 +135,9 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 					if (!*sd_name)
 					{
 						/* print filename and break enumerate */
-						/*
-						fputs ("FAIL: ", stderr);
-						fputs (path, stderr);
-						fputs ("/", stderr);
-						fputs (dirname, stderr);
-						fputs ("\n", stderr);
-						*/
 						fprintf (stderr, "FAIL: %s/%s\n", path, dirname);
 						perror ("malloc-rename");
-						continue;
+						break;
 					}
 				}
 				sd_name[1] = (sd_name[0] + (path_len + NAME_BUFSZ));
@@ -174,31 +150,36 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 					char *_dst_p = sd_name[1] + path_len + 1;
 					size_t _src_len = strlen (dirname);
 					size_t _dst_len = NAME_BUFSZ;
-					/* TODO: check sizes */
-					iconv (wdlist._iconv.cd,
+					size_t ret;
+					ret = iconv (wdlist._iconv.cd,
 							&_src_p,
 							&_src_len,
 							&_dst_p,
 							&_dst_len);
-				//	printf ("X: %s (%s)\n", sd_name[1], fromcode);
-				}
-				/* TODO: check exists path */
-				if (rename (sd_name[0], sd_name[1]) == -1)
-				{
-					fprintf (stderr, "FAIL: rename `%s' to `%s'\n", sd_name[0], sd_name[1]);
-					perror ("rename");
-					continue;
-				}
-				else
-				{
-					dirname = sd_name[1] + path_len + 1;
-					fprintf (stderr, "RENAME[%s]: `%s' to `%s'\n", fromcode, sd_name[0], sd_name[1]);
+					if ((size_t)-1 == ret)
+					{
+						fprintf (stderr, "FAIL: rename `%s' to `%s'\n", sd_name[0], sd_name[1]);
+						perror ("rename-iconv");
+					}
+					else
+					{
+						if (rename (sd_name[0], sd_name[1]) == -1)
+						{
+							fprintf (stderr, "FAIL: rename `%s' to `%s'\n", sd_name[0], sd_name[1]);
+							perror ("rename");
+							break;
+						}
+						else
+						{
+							dirname = sd_name[1] + path_len + 1;
+							printf ("RENAME[%s]: `%s' to `%s'\n", fromcode, sd_name[0], sd_name[1]);
+						}
+					}
 				}
 			}
 			while (false);
 			if (dir_en->d_type == DT_DIR)
 			{
-				printf ("ADD %s\n", dirname);
 				if (!wdir_push (&wdlist, dirname))
 				{
 					fprintf (stderr, "FAIL: %s/%s\n", path, dirname);
@@ -232,7 +213,7 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 				while (wdir_pop (&wdlist, sd_name[1]))
 				{
 					snprintf (sd_name[0], path_len + NAME_BUFSZ, "%s/%s", path, sd_name[1]);
-					process_dir (sd_name[0], enca, tocode);
+					process_dir (sd_name[0], opts);
 				}
 			}
 		}
@@ -243,43 +224,86 @@ process_dir (const char *restrict path, EncaAnalyser *restrict enca, const char 
 	return false;
 }
 
-void
-usage (const char *arg)
+/* opts */
+
+static void*
+_set (struct _opts_t *opts, void *cont_data, uint8_t id, size_t argc, char **argv)
 {
-	fprintf (stderr, "Example:\n");
-	fprintf (stderr, "\t%s ru UTF-8\n", arg);
+	switch (id)
+	{
+		case _SET_FROM:
+			strncpy (opts->from, argv[0], _RENCA_BFSZ);
+			break;
+		case _SET_TO:
+			strncpy (opts->to, argv[0], _RENCA_BFSZ);
+			break;
+		case _SET_DIR:
+			strncpy (opts->dir, argv[0], _RENCA_BFSZ);
+			break;
+		case _SET_LANG:
+			strncpy (opts->lang, argv[0], _RENCA_BFSZ);
+			break;
+	}
+	return NULL;
 }
+
+static struct opts_list_t opts_list[] =
+{
+	{"from", _SET_FROM, 0, (opts_callback_t)_set, 1, NULL},
+	{"to", _SET_TO, 0, (opts_callback_t)_set, 1, NULL},
+	{"on", _SET_DIR, 0, (opts_callback_t)_set, 1, NULL},
+	{"lang", _SET_LANG, 0, (opts_callback_t)_set, 1, NULL}
+};
+
+/* main */
 
 int
 main (int argc, char *argv[])
 {
 	iconv_t cdt;
-	EncaAnalyser enca = NULL;
-	if (argc < 3)
+	struct _opts_t opts;
+	memset (&opts, 0, sizeof (struct _opts_t));
+	opts_parse (&opts, opts_list, (size_t)argc - 1, argv + 1);
+	/* checks */
+	if (!strlen (opts.to))
+		snprintf (opts.to, _RENCA_BFSZ, "UTF-8");
+	/* set encoding to enca if len (from) is 0 or from == 'enca' */
+	if (!strncmp (opts.from, "enca", 5) || !strlen (opts.from))
 	{
-		usage (argv[0]);
-		return EXIT_FAILURE;
+		/* set default fromcode */
+		snprintf (opts.from, _RENCA_BFSZ, "ASCII");
+		/* check enca data */
+		if (!(opts.enca = enca_analyser_alloc (opts.lang)))
+		{
+			fprintf (stderr, "opts 'lang' must be content valid two-letter language code\n");
+			return EXIT_FAILURE;
+		}
+		enca_set_threshold (opts.enca, 1.38);
+		enca_set_multibyte (opts.enca, 1);
+		enca_set_ambiguity (opts.enca, 1);
+		enca_set_garbage_test (opts.enca, 1);
 	}
-	if ((cdt = iconv_open (argv[2], "UTF-8")) == (iconv_t)-1)
+	/* check convert */
+	if (!strlen (opts.to) || (cdt = iconv_open (opts.to, opts.from)) == (iconv_t)-1)
 	{
-		fprintf (stderr, "please define a valid iconv's converions destination\n");
-		usage (argv[0]);
+		fprintf (stderr, "please define a valid iconv's convert destination and source\n");
 		return EXIT_FAILURE;
 	}
 	iconv_close (cdt);
-	if (!(enca = enca_analyser_alloc (argv[1])))
+	if (!*opts.dir)
 	{
-		fprintf (stderr, "please define two-letter language code in command line\n");
-		usage (argv[0]);
-		return EXIT_FAILURE;
+		opts.dir[0] = '.';
+		opts.dir[1] = '\0';
 	}
-	enca_set_threshold (enca, 1.38);
-	enca_set_multibyte (enca, 1);
-	enca_set_ambiguity (enca, 1);
-	enca_set_garbage_test (enca, 1);
-	if (!process_dir (".", &enca, argv[2]))
+	printf ("process on: %s\n", opts.dir);
+	if (opts.enca)
+		printf ("convert with enca, use language %s, to %s\n", opts.lang, opts.to);
+	else
+		printf ("convert from: %s to %s\n", opts.from, opts.to);
+	if (!process_dir (".", &opts))
 		perror (".");
-	enca_analyser_free (enca);
+	if (opts.enca)
+		enca_analyser_free (opts.enca);
 	return EXIT_SUCCESS;
 }
 
